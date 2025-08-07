@@ -4,9 +4,8 @@
 # Docker Volume and Container Restore Script
 #
 # This script restores a Docker container image, its associated volumes,
-# and then automatically recreates the container using the restored assets
-# under its original name. It also handles local bind mounts, ensuring the
-# source paths exist on the host.
+# and its network connections. It then automatically recreates the container
+# using the restored assets under its original name.
 #
 # It requires 'jq' to be installed for parsing the container's configuration.
 #
@@ -14,7 +13,7 @@
 #   ./restore_docker.sh <path_to_backup_directory>
 #
 # Example:
-#   ./restore_docker.sh backup_my_web_app_20250807_211500
+#   ./restore_docker.sh backup_my_api_container_20250807_224500
 #
 #==============================================================================
 
@@ -153,7 +152,6 @@ while IFS= read -r bind_mount_json; do
     SOURCE_PATH=$(echo "$bind_mount_json" | jq -r '.Source')
     DEST_PATH=$(echo "$bind_mount_json" | jq -r '.Destination')
 
-    # Check if the source path exists on the host. It can be a file or a directory.
     if [ ! -f "$SOURCE_PATH" ] && [ ! -d "$SOURCE_PATH" ]; then
         echo "--------------------------------------------------"
         echo "‼️ ERROR: Missing Bind Mount Source Path"
@@ -166,6 +164,32 @@ while IFS= read -r bind_mount_json; do
     DOCKER_RUN_ARGS+=("-v" "${SOURCE_PATH}:${DEST_PATH}")
 done < <(echo "$CONFIG_JSON" | jq -c '.[0].Mounts[] | select(.Type == "bind")')
 
+# --- Network Restoration ---
+echo "Verifying container networks..."
+# Get all network names attached to the original container, excluding the default bridge
+NETWORKS=$(echo "$CONFIG_JSON" | jq -r '.[0].NetworkSettings.Networks | keys[] | select(. != "bridge")')
+FIRST_NETWORK_ATTACHED=false
+
+for network in $NETWORKS; do
+    echo "Checking for network: ${network}"
+    if ! docker network ls -q -f name="^${network}$" | grep -q .; then
+        echo "Network '${network}' not found. Creating it..."
+        docker network create "${network}"
+        echo "Network '${network}' created."
+    else
+        echo "Network '${network}' already exists."
+    fi
+
+    # The first custom network is attached at creation time with the --network flag.
+    if [ "$FIRST_NETWORK_ATTACHED" = false ]; then
+        NETWORK_ALIAS=$(echo "$CONFIG_JSON" | jq -r --arg net "$network" '.[0].NetworkSettings.Networks[$net].Aliases[0]')
+        DOCKER_RUN_ARGS+=("--network=${network}")
+        if [ "$NETWORK_ALIAS" != "null" ] && [ ! -z "$NETWORK_ALIAS" ]; then
+             DOCKER_RUN_ARGS+=("--network-alias=${NETWORK_ALIAS}")
+        fi
+        FIRST_NETWORK_ATTACHED=true
+    fi
+done
 
 DOCKER_RUN_ARGS+=("$LOADED_IMAGE")
 
@@ -174,6 +198,25 @@ echo "Executing command to start the new container..."
 printf "docker run %s\n" "${DOCKER_RUN_ARGS[*]}"
 
 docker run "${DOCKER_RUN_ARGS[@]}"
+
+# --- Attach to Additional Networks ---
+# If there were more than one custom network, connect the container to the rest.
+if [ "$FIRST_NETWORK_ATTACHED" = true ]; then
+    ADDITIONAL_NETWORKS=$(echo "$NETWORKS" | tail -n +2)
+    if [ ! -z "$ADDITIONAL_NETWORKS" ]; then
+        echo "--------------------------------------------------"
+        echo "Attaching container to additional networks..."
+        for network in $ADDITIONAL_NETWORKS; do
+            NETWORK_ALIAS=$(echo "$CONFIG_JSON" | jq -r --arg net "$network" '.[0].NetworkSettings.Networks[$net].Aliases[0]')
+            echo "Connecting '${ORIGINAL_NAME}' to network '${network}'"
+            if [ "$NETWORK_ALIAS" != "null" ] && [ ! -z "$NETWORK_ALIAS" ]; then
+                docker network connect --alias "${NETWORK_ALIAS}" "${network}" "${ORIGINAL_NAME}"
+            else
+                docker network connect "${network}" "${ORIGINAL_NAME}"
+            fi
+        done
+    fi
+fi
 
 echo "--------------------------------------------------"
 echo "✅ Restore and recreation process completed successfully!"
