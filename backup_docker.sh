@@ -50,7 +50,8 @@ echo "Backup directory created at: ./${BACKUP_DIR}"
 
 # --- Volume Backup ---
 # Get a list of all named volumes used by the container.
-VOLUMES=$(docker inspect -f '{{range .Mounts | afilter "Type" "volume"}}{{.Name}} {{end}}' "${CONTAINER_NAME}")
+# This uses a standard Go template 'if' condition to ensure portability.
+VOLUMES=$(docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}' "${CONTAINER_NAME}")
 
 # Check if the container has any named volumes.
 if [ -z "$VOLUMES" ]; then

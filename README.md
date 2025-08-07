@@ -10,6 +10,7 @@ These scripts handle everything: the container's image, its named volumes, and i
 
 -   **Complete Container Backup**: Creates a backup of the container's image using `docker commit` and saves it as a compressed (`.tar.gz`) archive.
 -   **Full Volume Backup**: Identifies all named volumes attached to a container and archives their contents into individual `.tar.gz` files.
+-   **Network Restoration**: Automatically recreates any custom networks used by the original container and attaches the restored container.
 -   **Organized Structure**: All volume backups are neatly stored in a dedicated `volumes/` subdirectory to prevent naming conflicts.
 -   **Configuration Save**: Saves the container's full configuration (from `docker inspect`) into a `container_config.json` file for perfect restoration.
 -   **Automated Restore**: The restore script reads the backup directory and automatically:
@@ -90,6 +91,7 @@ The script will handle the rest, leaving you with a perfectly restored container
 
   - **Existing Containers**: The restore script will fail if a container with the same name already exists on the target machine. You must manually remove it (`docker rm <container_name>`) before running the restore script.
   - **Bind Mounts**: If your original container used bind mounts (mounting a local directory from the host), you **must ensure those directories exist** on the target machine at the exact same path. The restore script will check for these paths and exit with an error if they are not found.
+  - **Networks**: The script will create any missing custom networks. If a network with the same name exists but has a different configuration (e.g., a different subnet), the script will use the existing network. This might cause issues if the container relies on specific network properties.
   - **Root/Sudo**: Depending on your Docker installation, you may need to run these scripts with `sudo`.
 
 <!-- end list -->
