@@ -50,9 +50,9 @@ if [ ! -d "$BACKUP_DIR" ]; then
   exit 1
 fi
 
-IMAGE_ARCHIVE="${BACKUP_DIR}/container_image.tar"
+IMAGE_ARCHIVE="${BACKUP_DIR}/container_image.tar.gz"
 if [ ! -f "$IMAGE_ARCHIVE" ]; then
-    echo "Error: Container image backup 'container_image.tar' not found in '${BACKUP_DIR}'."
+    echo "Error: Container image backup 'container_image.tar.gz' not found in '${BACKUP_DIR}'."
     exit 1
 fi
 
@@ -70,8 +70,8 @@ echo "Starting restore from directory '${BACKUP_DIR}'..."
 echo "--------------------------------------------------"
 echo "Checking container image status..."
 
-# Extract the image name from the archive's manifest without loading the whole archive.
-IMAGE_NAME_IN_ARCHIVE=$(tar -xOf "${IMAGE_ARCHIVE}" manifest.json | jq -r '.[0].RepoTags[0]')
+# Extract the image name from the gzipped archive's manifest without loading the whole archive.
+IMAGE_NAME_IN_ARCHIVE=$(tar -zxOf "${IMAGE_ARCHIVE}" manifest.json | jq -r '.[0].RepoTags[0]')
 
 # Check if the image already exists locally.
 if docker image inspect "${IMAGE_NAME_IN_ARCHIVE}" &> /dev/null; then
@@ -79,19 +79,21 @@ if docker image inspect "${IMAGE_NAME_IN_ARCHIVE}" &> /dev/null; then
     LOADED_IMAGE="${IMAGE_NAME_IN_ARCHIVE}"
 else
     echo "Restoring container image from ${IMAGE_ARCHIVE}..."
-    LOADED_IMAGE=$(docker load -i "${IMAGE_ARCHIVE}" | sed -n 's/Loaded image: //p')
+    # Decompress the gzipped archive and pipe it to 'docker load'.
+    LOADED_IMAGE=$(gunzip -c "${IMAGE_ARCHIVE}" | docker load | sed -n 's/Loaded image: //p')
     if [ -z "$LOADED_IMAGE" ]; then
-        LOADED_IMAGE=$(docker load -i "${IMAGE_ARCHIVE}" | awk -F ' ' '{print $3}' | head -n 1)
+        LOADED_IMAGE=$(gunzip -c "${IMAGE_ARCHIVE}" | docker load | awk -F ' ' '{print $3}' | head -n 1)
     fi
     echo "Successfully loaded image: ${LOADED_IMAGE}"
 fi
 
 
 # --- Volume Restore ---
-if ! ls "${BACKUP_DIR}"/*.tar.gz &> /dev/null; then
-    echo "Warning: No volume backups (*.tar.gz) found in '${BACKUP_DIR}'. Skipping volume restore."
+VOLUME_BACKUP_DIR="${BACKUP_DIR}/volumes"
+if [ ! -d "$VOLUME_BACKUP_DIR" ] || ! ls "${VOLUME_BACKUP_DIR}"/*.tar.gz &> /dev/null; then
+    echo "Warning: No volume backups found in '${VOLUME_BACKUP_DIR}'. Skipping volume restore."
 else
-    for backup_file in "${BACKUP_DIR}"/*.tar.gz; do
+    for backup_file in "${VOLUME_BACKUP_DIR}"/*.tar.gz; do
         VOLUME_NAME=$(basename "${backup_file}" .tar.gz)
         echo "--------------------------------------------------"
         echo "Restoring volume: ${VOLUME_NAME}"
@@ -105,9 +107,9 @@ else
 
         docker run --rm \
             -v "${VOLUME_NAME}":/volume_data \
-            -v "$(cd "${BACKUP_DIR}" && pwd)":/backup_target:ro \
+            -v "$(cd "${VOLUME_BACKUP_DIR}" && pwd)":/backup_target:ro \
             ubuntu \
-            tar xzf "/backup_target/${VOLUME_NAME}.tar.gz" -C /volume_data
+            tar xzf "/backup_target/$(basename ${backup_file})" -C /volume_data
         echo "Successfully restored data to volume '${VOLUME_NAME}'"
     done
 fi

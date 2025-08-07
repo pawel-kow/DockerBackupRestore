@@ -4,17 +4,17 @@
 # Docker Volume and Container Backup Script
 #
 # This script backs up all volumes associated with a given Docker container,
-# and also saves an image of the container itself.
+# and also saves a compressed image of the container itself.
 #
 # It inspects the container to find its volumes, creates a compressed
-# tarball for each volume, commits the container to a new image, and saves
-# that image to a tarball.
+# tarball for each volume inside a dedicated 'volumes' directory, commits
+# the container to a new image, and saves that image to a gzipped tarball.
 #
 # Usage:
-#   ./backup_docker_volumes.sh <container_name_or_id>
+#   ./backup_docker.sh <container_name_or_id>
 #
 # Example:
-#   ./backup_docker_volumes.sh my_postgres_container
+#   ./backup_docker.sh my_postgres_container
 #
 #==============================================================================
 
@@ -44,16 +44,15 @@ fi
 # --- Backup Process ---
 echo "Starting backup for container '${CONTAINER_NAME}'..."
 
-# Create a dedicated directory for this backup.
-mkdir -p "${BACKUP_DIR}"
+# Create dedicated directories for this backup.
+mkdir -p "${BACKUP_DIR}/volumes"
 echo "Backup directory created at: ./${BACKUP_DIR}"
 
 # --- Volume Backup ---
-# Get a list of all volumes used by the container.
-# We inspect the container's .Mounts section, which contains volume info.
-VOLUMES=$(docker inspect -f '{{range .Mounts}}{{.Name}} {{end}}' "${CONTAINER_NAME}")
+# Get a list of all named volumes used by the container.
+VOLUMES=$(docker inspect -f '{{range .Mounts | afilter "Type" "volume"}}{{.Name}} {{end}}' "${CONTAINER_NAME}")
 
-# Check if the container has any volumes.
+# Check if the container has any named volumes.
 if [ -z "$VOLUMES" ]; then
     echo "Warning: Container '${CONTAINER_NAME}' does not use any named volumes. Nothing to back up."
 else
@@ -66,8 +65,8 @@ else
             -v "${volume}":/volume_data:ro \
             -v "$(pwd)/${BACKUP_DIR}":/backup_target \
             ubuntu \
-            tar czf "/backup_target/${volume}.tar.gz" -C /volume_data .
-        echo "Successfully backed up volume '${volume}' to ./${BACKUP_DIR}/${volume}.tar.gz"
+            tar czf "/backup_target/volumes/${volume}.tar.gz" -C /volume_data .
+        echo "Successfully backed up volume '${volume}' to ./${BACKUP_DIR}/volumes/${volume}.tar.gz"
     done
 fi
 
@@ -79,16 +78,17 @@ echo "Backing up the container image..."
 # Docker image names must be lowercase. Convert the container name.
 LOWERCASE_CONTAINER_NAME=$(echo "${CONTAINER_NAME}" | tr '[:upper:]' '[:lower:]')
 TEMP_IMAGE_NAME="${LOWERCASE_CONTAINER_NAME}_backup_img:${TIMESTAMP}"
-IMAGE_FILENAME="${BACKUP_DIR}/container_image.tar"
+IMAGE_FILENAME="${BACKUP_DIR}/container_image.tar.gz"
 
 # Commit the container's filesystem to a new, temporary image.
 # The -p flag pauses the container during commit to ensure data consistency.
 echo "Committing container '${CONTAINER_NAME}' to a temporary image: ${TEMP_IMAGE_NAME}"
 docker commit -p "${CONTAINER_NAME}" "${TEMP_IMAGE_NAME}"
 
-# Save the new image to a tar archive.
-echo "Saving image to ${IMAGE_FILENAME}"
-docker save -o "${IMAGE_FILENAME}" "${TEMP_IMAGE_NAME}"
+# Save the new image to a gzipped tar archive.
+# We pipe the output of 'docker save' to 'gzip' for compression.
+echo "Saving and compressing image to ${IMAGE_FILENAME}"
+docker save "${TEMP_IMAGE_NAME}" | gzip > "${IMAGE_FILENAME}"
 
 # Clean up by removing the temporary image.
 echo "Removing temporary image ${TEMP_IMAGE_NAME}"

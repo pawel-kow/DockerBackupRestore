@@ -1,5 +1,3 @@
-Of course. Here is the `README.md` file as a markdown source code block.
-
 # Docker Container & Volume Backup and Restore Scripts
 
 A set of two powerful `bash` scripts to simplify the process of creating complete, portable backups of your Docker containers and restoring them on any machine.
@@ -10,12 +8,13 @@ These scripts handle everything: the container's image, its named volumes, and i
 
 ## Features
 
--   **Complete Container Backup**: Creates a backup of the container's image using `docker commit` and `docker save`.
+-   **Complete Container Backup**: Creates a backup of the container's image using `docker commit` and saves it as a compressed (`.tar.gz`) archive.
 -   **Full Volume Backup**: Identifies all named volumes attached to a container and archives their contents into individual `.tar.gz` files.
+-   **Organized Structure**: All volume backups are neatly stored in a dedicated `volumes/` subdirectory to prevent naming conflicts.
 -   **Configuration Save**: Saves the container's full configuration (from `docker inspect`) into a `container_config.json` file for perfect restoration.
 -   **Automated Restore**: The restore script reads the backup directory and automatically:
     -   Loads the container image.
-    -   Restores all volume data into new Docker volumes.
+    -   Restores all volume data into new Docker volumes from the `volumes/` subdirectory.
     -   Recreates the container with its **original name** and configuration.
 -   **Intelligent Checks**:
     -   Checks for dependencies like `jq`.
@@ -55,13 +54,16 @@ Run the `backup_docker.sh` script with the name or ID of the container you wish 
 ./backup_docker.sh my_postgres_db
 ```
 
-This will create a new directory named `backup_my_postgres_db_YYYYMMDD_HHMMSS` containing:
+This will create a new directory named `backup_my_postgres_db_YYYYMMDD_HHMMSS` with the following structure:
 
-  - `container_image.tar`: The container's image.
-  - `container_config.json`: The full container configuration.
-  - `<volume_name_1>.tar.gz`: A compressed archive for the first volume.
-  - `<volume_name_2>.tar.gz`: A compressed archive for the second volume.
-  - ...and so on for all attached volumes.
+```
+backup_my_postgres_db_20250807_223000/
+├── container_image.tar.gz
+├── container_config.json
+└── volumes/
+    ├── volume_one.tar.gz
+    └── volume_two.tar.gz
+```
 
 ### 2\. Restoring a Container
 
@@ -77,7 +79,7 @@ This will create a new directory named `backup_my_postgres_db_YYYYMMDD_HHMMSS` c
 **Example:**
 
 ```bash
-./restore_docker.sh backup_my_postgres_db_20250807_221000
+./restore_docker.sh backup_my_postgres_db_20250807_223000
 ```
 
 The script will handle the rest, leaving you with a perfectly restored container running under its original name.
@@ -89,3 +91,5 @@ The script will handle the rest, leaving you with a perfectly restored container
   - **Existing Containers**: The restore script will fail if a container with the same name already exists on the target machine. You must manually remove it (`docker rm <container_name>`) before running the restore script.
   - **Bind Mounts**: If your original container used bind mounts (mounting a local directory from the host), you **must ensure those directories exist** on the target machine at the exact same path. The restore script will check for these paths and exit with an error if they are not found.
   - **Root/Sudo**: Depending on your Docker installation, you may need to run these scripts with `sudo`.
+
+<!-- end list -->
